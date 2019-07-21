@@ -228,17 +228,21 @@ Resources:
               ToPort: 65535
               CidrIp: 0.0.0.0/0
 
-    WebLaunchConfig:
+    WebAppLaunchConfig:
         Type: AWS::AutoScaling::LaunchConfiguration
         Properties:
             UserData: 
                 Fn::Base64: !Sub |
-                    !/bin/bash
+                    #!/bin/bash
                     yum update -y
                     yum install -y httpd
-                    systemctl start httpd
-                    systemctl enable httpd
-                    wget -P ../../var/www/html https://s3.us-east-2.amazonaws.com/test-udagram-1/index.html
+                    service httpd start
+                    chkconfig httpd on
+                    aws s3 cp s3://cloud-devops-project2-alanr/udacity.zip /var/www/html/udacity.zip
+                    cd /var/www/html
+                    unzip udacity.zip
+                    rm udacity.zip
+                    cd
             ImageId: ami-0f2176987ee50226e
             IamInstanceProfile: !Ref RootInstanceProfile
             SecurityGroups:
@@ -248,6 +252,13 @@ Resources:
                 - DeviceName: "/dev/sdk"
                   Ebs:
                     VolumeSize: '10' 
+
+#  Credits/Acknowledgements:
+#  
+#  RootRole, RolePolices, and RootInstanceProfile taken from
+#  https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/quickref-iam.html
+#
+
     RootRole:
       Type: AWS::IAM::Role
       Properties:
@@ -281,20 +292,20 @@ Resources:
         Path: "/"
         Roles:
         - !Ref RootRole
-#
-#    WebAppGroup:
-#        Type: AWS::AutoScaling::AutoScalingGroup
-#        Properties:
-#            VPCZoneIdentifier:
-#            - FN::ImportValue:
-#                !Sub "${EnvironmentName}-PRIV-NETS"
-#            LaunchConfigurationName:
-#                Ref: WebAppLaunchConfig
-#            MinSize: '3'
-#            MaxSize: '5'
-#            TargetGroupARNs:
-#            - Ref: WebAppTargetGroup
-#    
+
+    WebAppGroup:
+        Type: AWS::AutoScaling::AutoScalingGroup
+        Properties:
+            VPCZoneIdentifier:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+            LaunchConfigurationName:
+                Ref: WebAppLaunchConfig
+            MinSize: '1'
+            MaxSize: '1'
+            TargetGroupARNs:
+            - !Ref WebAppTargetGroup
+    
     WebAppLB:
         Type: AWS::ElasticLoadBalancingV2::LoadBalancer
         Properties:
@@ -327,8 +338,37 @@ Resources:
             UnhealthyThresholdCount: 5
             VpcId: !Ref VPC
 
+#    BastionSecGroup:
+#        Type: AWS::EC2::SecurityGroup
+#        Properties:
+#            GroupDescription: Allow SSH only from my IP
+#            VpcId: !Ref VPC
+#            SecurityGroupIngress:
+#            - IpProtocol: tcp
+#              FromPort: 22
+#              ToPort: 22
+#              CidrIp: IP_ADDRESS_ALLOWED_TO_ACCESS_BASTION
+#            SecurityGroupEgress:
+#            - IpProtocol: tcp
+#              FromPort: 0
+#              ToPort: 65535
+#              CidrIp: 0.0.0.0/0
+#
+#    BastionHost:
+#        Type: AWS::EC2::Instance
+#        DependsOn: InternetGatewayAttachment
+#        Properties:
+#            InstanceType: t3.small
+#            SecurityGroupIds:
+#            - !Ref BastionSecGroup
+#            KeyName: oregon-bastion
+#            ImageId: ami-0f2176987ee50226e
+#            SubnetId: !Ref PublicSubnet1
+#            Tags:
+#              -
+#                Key: Name
+#                Value: Bastion
 
-        
 
 Outputs:
 
@@ -350,4 +390,8 @@ Outputs:
         Export:
             Name: !Sub "${EnvironmentName}-PRIV-RT-2"
 
-
+    LoadBalancerURL: 
+        Description: URL of the Load Balancer
+        Value: !GetAtt WebAppLB.DNSName
+        Export:
+            Name: !Sub "${EnvironmentName}-LB-URL"
